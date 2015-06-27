@@ -1,0 +1,12 @@
+{application, hermes,
+ [
+  {description, "Hermes Encrypted Relay of Message, an Erlang-based System"},
+  {vsn, "0.1.0"},
+  {registered, []},
+  {applications, [
+                  kernel,
+                  stdlib
+                 ]},
+  {mod, { hermes_app, []}},
+  {env, []}
+ ]}.
