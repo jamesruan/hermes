@@ -8,8 +8,8 @@ Record ::= SEQUENCE {
 }
 
 Address ::= CHOICE {
-		inet    Inet-addr,
-		inet6   Inet6-addr
+	inet    Inet-addr,
+	inet6   Inet6-addr
 }
 
 Inet-addr ::= SEQUENCE {
