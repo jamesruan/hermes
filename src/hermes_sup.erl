@@ -23,5 +23,8 @@ start_link() ->
 %% ===================================================================
 
 init([]) ->
-    {ok, { {one_for_one, 5, 10}, []} }.
+    init({one_for_one, 5, 10});
+init({Strategy, MaxRestart, MaxTime}) ->
+	{ok, {{Strategy, MaxRestart, MaxTime},
+		[]}}.
 

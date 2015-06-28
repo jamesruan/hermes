@@ -8,5 +8,7 @@
                   stdlib
                  ]},
   {mod, { hermes_app, []}},
-  {env, []}
+  {env, [
+         {errorLoggerFile, "./log/log"}
+        ]}
  ]}.

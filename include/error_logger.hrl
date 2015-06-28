@@ -1,0 +1,7 @@
+-define(PERROR(Msg), erl_posix_msg:message(Msg)).
+-define(INFO(Data), error_logger:info_msg("[~p] " ++ Data, [?MODULE])).
+-define(WARN(Data), error_logger:warning_msg("[~p] " ++ Data, [?MODULE])).
+-define(ERROR(Data), error_logger:error_msg("[~p] " ++ Data, [?MODULE])).
+-define(INFO(Format, Data), error_logger:info_msg("[~p] " ++ Format, [?MODULE | Data])).
+-define(WARN(Format, Data), error_logger:warning_msg("[~p] " ++ Format, [?MODULE | Data])).
+-define(ERROR(Format, Data), error_logger:error_msg("[~p] " ++ Format, [?MODULE | Data])).
