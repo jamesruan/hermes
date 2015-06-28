@@ -1,0 +1,24 @@
+Dhti DEFINITIONS AUTOMATIC TAGS::= BEGIN
+Record ::= SEQUENCE {
+	id       OCTET STRING (SIZE(16)),
+	ver      UTCTime,
+	pub-key  OCTET STRING (SIZE(32)),
+	dhtp-key OCTET STRING (SIZE(16)),
+	addr     SEQUENCE (SIZE(1..4)) OF Address
+}
+
+Address ::= CHOICE {
+		inet    Inet-addr,
+		inet6   Inet6-addr
+}
+
+Inet-addr ::= SEQUENCE {
+	host  BIT STRING (SIZE(32)),
+	port  BIT STRING (SIZE(16))
+}
+
+Inet6-addr ::= SEQUENCE {
+	host  BIT STRING (SIZE(128)),
+	port  BIT STRING (SIZE(16))
+}
+END
