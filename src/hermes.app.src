@@ -9,7 +9,7 @@
                  ]},
   {mod, { hermes_app, []}},
   {env, [
-         {errorLoggerFile, "./log/log"},
-         {nodesDumpFile, "./db/nodes"}
+         {errorLoggerFile, "log/log"},
+         {nodesDumpFile, "db/nodes"}
         ]}
  ]}.

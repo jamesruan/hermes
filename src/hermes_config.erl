@@ -1,40 +1,61 @@
 -module(hermes_config).
+-include("error_logger.hrl").
 
 -export[start_link/0].
 
 % internal functions
--export[init/1, stop/0, do_save/1].
+-export[init/1, stop/0, do_save/2, do_save/1, do_save_all/0].
 
 start_link() ->
-	{ok, NodesDump} = application:get_env(nodesDumpFile),
-	spawn_link(?MODULE, init, [NodesDump]).
+	Tablist = [{nodes, nodesDumpFile}],
+	spawn_link(?MODULE, init, [Tablist]).
 
-init(NodesDump) ->
-	case file:open(NodesDump, [read, write, exclusive]) of
+load_configs(Name, FileNameKey, Tail) ->
+	{ok, File} = application:get_env(FileNameKey),
+	case file:open(File, [read, write, exclusive]) of
 	{ok, Fd} ->
-		error_logger:info_msg("NodesDumpFile not exist, create for writing.~n"),
+		?INFO("~p not exist, create for writing.", [File]),
 		file:close(Fd),
-		Nodes = ets:new(nodes, []),
-		put(nodes, {Nodes, NodesDump});
+		Table = ets:new(Name, []),
+		put(Name, {Table, File});
 	{error, eexist} ->
-		error_logger:info_msg("NodesDumpFile exists, open for writing.~n"),
-		case ets:file2tab(NodesDump) of
-		{ok, Nodes} ->
-			put(nodes, {Nodes, NodesDump});
+		?INFO("~p exists, open for writing.", [File]),
+		case ets:file2tab(File) of
+		{ok, Table} ->
+			put(Name, {Table, File});
 		{error, Reason} ->
-			error_logger:error_report(Reason),
-			exit(terminated)
-		end;
-	{error, Reason} ->
-		error_logger:error_report(Reason),
-		exit(terminated)
+			?ERRORP(Reason),
+			case file:open(File, [write]) of
+			{ok, Fd} ->
+				?INFO("~p broken, create new for writing.", [File]),
+				file:close(Fd),
+				Table = ets:new(Name, []),
+				put(Name, {Table, File});
+			{error, Reason} ->
+				?ERROR(?PERROR(Reason))
+			end
+		end
+	end,
+
+	case Tail of
+	[{NewName, NewFileNameKey} | NewTail] ->
+		load_configs(NewName, NewFileNameKey, NewTail);
+	_ ->
+		ok
+	end.
+
+init(Tablist) ->
+	put(tablist, Tablist),
+	case Tablist of
+	[{Name, FileNameKey} | Tail] ->
+		ok = load_configs(Name, FileNameKey, Tail)
 	end,
 
 	register(hermes_config, self()),
 	loop().
 
 stop() ->
-	{ets_save, nodes, ok} = ?MODULE:do_save(nodes),
+	?MODULE:do_save_all(),
 	unregister(hermes_config),
 	exit(normal).
 
@@ -43,7 +64,7 @@ loop() ->
 	{lookup, Pid, Table, Key} ->
 		case get(Table) of
 		undefined ->
-			error_logger:error_msg("Table '~p' not existed.~n", [Table]);
+			?ERROR("Table '~p' not existed.", [Table]);
 		{TableId, _File} ->
 			case ets:lookup(TableId, Key) of
 			[] ->
@@ -55,14 +76,14 @@ loop() ->
 	{insert, Pid, Table, Object} ->
 		case get(Table) of
 		undefined ->
-			error_logger:error_msg("Table '~p' not existed.~n", [Table]);
+			?ERROR("Table '~p' not existed.", [Table]);
 		{TableId, _File} ->
 			case Object of 
 			{_Key, _Value} ->
 				ets:insert(TableId, Object),
 				Pid ! {ets_insert, Table, Object, ok};
 			_ ->
-				error_logger:warning_msg("Invalid Object: ~p ~n.", [Object])
+				?ERROR("Invalid Object: ~p.", [Object])
 			end
 		end;
 	{save, Pid, Table} ->
@@ -70,28 +91,43 @@ loop() ->
 	{info, Pid, Table} ->
 		case get(Table) of
 		undefined ->
-			error_logger:error_msg("Table '~p' not existed.~n", [Table]);
+			?ERROR("Table '~p' not existed.", [Table]);
 		{TableId, _File} ->
 			Pid ! {ets_info, Table, ets:info(TableId)}
 		end;
 	stop ->
 		?MODULE:stop();
 	Other ->
-		error_logger:warn_msg("Unknown message: ~p.~n", [Other])
+		?WARN("Unknown message: ~p.", [Other])
 	end,
 	loop().
 
 do_save(Table) ->
-	case get(Table) of
+	do_save(Table, []).
+
+do_save(Table, Tail) ->
+	R = case get(Table) of
 	undefined ->
-		error_logger:error_msg("Table '~p' not existed.~n", [Table]);
+		?ERROR("Table '~p' not existed.", [Table]);
 	{TableId, File} ->
 		case ets:tab2file(TableId, File) of
 		ok ->
-			error_logger:info_msg("Table '~p' saved.~n", [Table]),
+			?INFO("Table '~p' saved.", [Table]),
 			{ets_save, Table, ok};
 		{error, Reason} ->
-			error_logger:error_msg("Table '~p' can not be saved: ~p.~n", [Table, Reason]),
+			?ERROR("Table '~p' can not be saved: ~p.", [Table, Reason]),
 			{ets_save, Table, error, Reason}
 		end
+	end,
+	case Tail of
+	[{NTable,_}| NTail] ->
+		{ets_save, NTable, ok} = do_save(NTable, NTail);
+	_ ->
+		R
 	end.
+
+do_save_all() ->
+	Tablelist = get(tablist),
+	[{Table,_}| Tail] = Tablelist,
+	{ets_save, Table, ok} = do_save(Table, Tail),
+	ok.

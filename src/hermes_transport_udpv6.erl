@@ -1,4 +1,5 @@
 -module('hermes_transport_udpv6').
+-include("error_logger.hrl").
 
 -export([start/3, init/3]).
 
@@ -14,7 +15,7 @@ init(Pid, Address, Port) ->
 		put(name, inet:sockname(Socket)),
 		loop();
 	{error, Reason} ->
-		error_logger:info_report(Reason),
+		?ERRORP(Reason),
 		exit(error)
 	end.
 
@@ -38,6 +39,6 @@ loop() ->
 		end,
 		loop();
 	{'EXIT', _Port, Reason} ->
-		error_logger:info_msg("Socket ~p closed:~p.~n", [get(name), Reason]),
+		?INFO("Socket ~p closed:~p.", [get(name), Reason]),
 		exit(Reason)
 	end.
