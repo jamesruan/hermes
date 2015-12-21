@@ -15,11 +15,12 @@ start(_StartType, _StartArgs) ->
 	{ok, LogFile} = application:get_env(errorLoggerFile),
 	case error_logger:logfile({open, LogFile}) of
 		ok ->
-			?INFO("File Logger stated~n");
+			?INFO("File Logger started~n");
 		{error, R} ->
 			?INFO("Start File Logger: ~s~n", [?PERROR(R)])
 	end,
-    hermes_sup:start_link().
+	hermes_config:start_link(),
+	hermes_sup:start_link().
 
 stop(_State) ->
 	error_logger:logfile(close),
