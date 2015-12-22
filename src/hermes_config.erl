@@ -104,6 +104,15 @@ handle_call(Request, _From, State) ->
 		{Table, _File, Tab} ->
 			{reply, {ets_info, Table, ets:info(Tab)}, State}
 		end;
+	{clear, Table} ->
+		case lists:keyfind(Table, 1, TableFileTabList) of
+		false ->
+			?ERROR("Table '~p' not existed.", [Table]),
+			{reply, {ets_clear, Table, error}, State};
+		{Table, _File, Tab} ->
+			true = ets:delete_all_objects(Tab),
+			{reply, {ets_clear, Table, ok}, State}
+		end;
 	Other ->
 		?WARN("Unknown message: ~p.", [Other]),
 		{reply, unknown, State}
