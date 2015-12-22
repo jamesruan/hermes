@@ -1,133 +1,179 @@
 -module(hermes_config).
+-behaviour(gen_server).
 -include("error_logger.hrl").
 
--export[start_link/0].
+%% ------------------------------------------------------------------
+%% API Function Exports
+%% ------------------------------------------------------------------
 
-% internal functions
--export[init/1, stop/0, do_save/2, do_save/1, do_save_all/0].
+-export([start_link/0]).
+
+%% ------------------------------------------------------------------
+%% gen_server Callback Function Exports
+%% ------------------------------------------------------------------
+-export([init/1, handle_call/3, handle_cast/2, handle_info/2,
+         terminate/2, code_change/3]).
+
+%% ------------------------------------------------------------------
+%% Internal Function Exports
+%% ------------------------------------------------------------------
+
+%% ------------------------------------------------------------------
+%% API Function Definition
+%% ------------------------------------------------------------------
 
 start_link() ->
-	Tablist = [{nodes, nodesDumpFile}],
-	spawn_link(?MODULE, init, [Tablist]).
+	gen_server:start_link({local, ?MODULE}, ?MODULE, [], []).
 
-load_configs(Name, FileNameKey, Tail) ->
-	{ok, File} = application:get_env(FileNameKey),
-	case file:open(File, [read, write, exclusive]) of
-	{ok, Fd} ->
-		?INFO("~p not exist, create for writing.", [File]),
-		file:close(Fd),
-		Table = ets:new(Name, []),
-		put(Name, {Table, File});
-	{error, eexist} ->
-		?INFO("~p exists, open for writing.", [File]),
-		case ets:file2tab(File) of
-		{ok, Table} ->
-			put(Name, {Table, File});
-		{error, Reason} ->
-			?ERRORP(Reason),
-			case file:open(File, [write]) of
-			{ok, Fd} ->
-				?INFO("~p broken, create new for writing.", [File]),
-				file:close(Fd),
-				Table = ets:new(Name, []),
-				put(Name, {Table, File});
-			{error, Reason} ->
-				?ERROR(?PERROR(Reason))
-			end
-		end
+%% ------------------------------------------------------------------
+%% gen_server Callback Function Definitions
+%% ------------------------------------------------------------------
+
+init([]) ->
+	process_flag(trap_exit, true),
+
+	{ok, Tablelist} = application:get_env(tablelist),
+	TableFileList = lists:map(fun(TableName) ->
+		{ok, File} = application:get_env(hermes, TableName),
+		{TableName, File} end,
+		 Tablelist),
+
+	TableFileTabList = [load_configs(X) || X <- TableFileList],
+	{ok, TableFileTabList}.
+
+terminate(Reason, State) ->
+	case Reason of
+	normal ->
+		?INFO("hermes_config exit normally."),
+		do_save_all(State);
+	shutdown ->
+		?INFO("hermes_config terminated."),
+		do_save_all(State);
+	{shutdown, Info} ->
+		?INFO("hermes_config terminated with info: ~p.", [Info]),
+		do_save_all(State);
+	OtherReason ->
+		?INFO("hermes_config was terminating by reason:~p.", [OtherReason])
 	end,
-
-	case Tail of
-	[{NewName, NewFileNameKey} | NewTail] ->
-		load_configs(NewName, NewFileNameKey, NewTail);
-	_ ->
-		ok
-	end.
-
-init(Tablist) ->
-	put(tablist, Tablist),
-	case Tablist of
-	[{Name, FileNameKey} | Tail] ->
-		ok = load_configs(Name, FileNameKey, Tail)
-	end,
-
-	register(hermes_config, self()),
-	loop().
-
-stop() ->
-	?MODULE:do_save_all(),
-	unregister(hermes_config),
-	exit(normal).
-
-loop() ->
-	receive
-	{lookup, Pid, Table, Key} ->
-		case get(Table) of
-		undefined ->
-			?ERROR("Table '~p' not existed.", [Table]);
-		{TableId, _File} ->
-			case ets:lookup(TableId, Key) of
-			[] ->
-				Pid ! {ets_lookup, Table, Key, none};
-			[{Key, Value}] ->
-				Pid ! {ets_lookup, Table, Key, Value}
-			end
-		end;
-	{insert, Pid, Table, Object} ->
-		case get(Table) of
-		undefined ->
-			?ERROR("Table '~p' not existed.", [Table]);
-		{TableId, _File} ->
-			case Object of 
-			{_Key, _Value} ->
-				ets:insert(TableId, Object),
-				Pid ! {ets_insert, Table, Object, ok};
-			_ ->
-				?ERROR("Invalid Object: ~p.", [Object])
-			end
-		end;
-	{save, Pid, Table} ->
-		Pid ! ?MODULE:do_save(Table);
-	{info, Pid, Table} ->
-		case get(Table) of
-		undefined ->
-			?ERROR("Table '~p' not existed.", [Table]);
-		{TableId, _File} ->
-			Pid ! {ets_info, Table, ets:info(TableId)}
-		end;
-	stop ->
-		?MODULE:stop();
-	Other ->
-		?WARN("Unknown message: ~p.", [Other])
-	end,
-	loop().
-
-do_save(Table) ->
-	do_save(Table, []).
-
-do_save(Table, Tail) ->
-	R = case get(Table) of
-	undefined ->
-		?ERROR("Table '~p' not existed.", [Table]);
-	{TableId, File} ->
-		case ets:tab2file(TableId, File) of
-		ok ->
-			?INFO("Table '~p' saved.", [Table]),
-			{ets_save, Table, ok};
-		{error, Reason} ->
-			?ERROR("Table '~p' can not be saved: ~p.", [Table, Reason]),
-			{ets_save, Table, error, Reason}
-		end
-	end,
-	case Tail of
-	[{NTable,_}| NTail] ->
-		{ets_save, NTable, ok} = do_save(NTable, NTail);
-	_ ->
-		R
-	end.
-
-do_save_all() ->
-	Tablelist = get(tablist),
-	[{Table,_}| Tail] = Tablelist,
-	{ets_save, Table, ok} = do_save(Table, Tail),
 	ok.
+
+handle_call(Request, _From, State) ->
+	TableFileTabList = State,
+	case Request of
+	{lookup, Table, Key} ->
+		case lists:keyfind(Table, 1, TableFileTabList) of
+		false ->
+			?ERROR("Table '~p' not existed.", [Table]),
+			{reply, {ets_lookup, Table, Key, error}, State};
+		{Table, _File, Tab} ->
+			case ets:lookup(Tab, Key) of
+			[] ->
+				{reply, {ets_lookup, Table, Key, none}, State};
+			[{Key, Value}] ->
+				{reply, {ets_lookup, Table, Key, Value}, State}
+			end
+		end;
+	{insert, Table, Object} ->
+		case lists:keyfind(Table, 1, TableFileTabList) of
+		false ->
+			?ERROR("Table '~p' not existed.", [Table]),
+			{reply, {ets_insert, Table, Object, error}, State};
+		{Table, _File, Tab} ->
+			case Object of
+			{_Key, _Value} ->
+				ets:insert(Tab, Object),
+				{reply, {ets_insert, Table, Object, ok}, State};
+			_ ->
+				?ERROR("Invalid Object: ~p.", [Object]),
+				{reply, {ets_insert, Table, Object, invalid}, State}
+			end
+		end;
+	{save, Table} ->
+		case lists:keyfind(Table, 1, TableFileTabList) of
+		false ->
+			?ERROR("Table '~p' not existed.", [Table]),
+			{reply, {ets_save, Table, error}, State};
+		TableFileTab ->
+			{reply, {ets_save, Table, do_save(TableFileTab)}, State}
+		end;
+	{info, Table} ->
+		case lists:keyfind(Table, 1, TableFileTabList) of
+		false ->
+			?ERROR("Table '~p' not existed.", [Table]),
+			{reply, {ets_info, Table, error}, State};
+		{Table, _File, Tab} ->
+			{reply, {ets_info, Table, ets:info(Tab)}, State}
+		end;
+	Other ->
+		?WARN("Unknown message: ~p.", [Other]),
+		{reply, unknown, State}
+	end.
+
+handle_cast(_Request, State) ->
+	{noreply, State}.
+
+handle_info(_Info, State) ->
+	{noreply, State}.
+
+code_change(_OldVsn, State, _Extra) ->
+	{ok, State}.
+
+%% ------------------------------------------------------------------
+%% Internal Functions
+%% ------------------------------------------------------------------
+do_save(TableFileTab) ->
+	{TableName, File, Tab} = TableFileTab,
+	ok = case ets:tab2file(Tab, File) of
+	ok ->
+		?INFO("Table '~p' saved.", [TableName]),
+		ok;
+	{error, Reason} ->
+		?ERROR("Table '~p' can not be saved: ~p.", [TableName, Reason]),
+		error
+	end.
+
+do_save_all(TableFileTabList) ->
+	[ok = do_save(X) || X <- TableFileTabList],
+	ok.
+
+load_configs(TableFile) ->
+	?INFOP(TableFile),
+	{TableName, FilePath} = TableFile,
+
+	case open_create(FilePath) of
+	created ->
+		Tab = ets:new(TableName, []),
+		{TableName, FilePath, Tab};
+	existed ->
+		?INFO("~p exists, loading.", [FilePath]),
+		case ets:file2tab(FilePath) of
+		{ok, Tab} ->
+			{TableName, FilePath, Tab};
+		{error, Reason} ->
+			?WARNP(Reason),
+			?INFO("~p broken, create new for writing.", [FilePath]),
+			ok = open_truncate(FilePath),
+			Tab = ets:new(TableName, []),
+			{TableName, FilePath, Tab}
+		end
+	end.
+
+open_create(FilePath) ->
+	case file:open(FilePath, [read, write, exclusive]) of
+	{ok, File} ->
+		?INFO("~p not exist, creating.", [FilePath]),
+		file:close(File),
+		created;
+	{error, eexist} ->
+		existed
+	end.
+
+open_truncate(FilePath) ->
+	case file:open(FilePath, [write]) of
+	{ok, File} ->
+		file:close(File),
+		ok;
+	{error, Reason} ->
+		?ERROR(?PERROR(Reason)),
+		error
+	end.
