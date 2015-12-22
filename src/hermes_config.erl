@@ -6,7 +6,8 @@
 %% API Function Exports
 %% ------------------------------------------------------------------
 
--export([start_link/0]).
+-export([start_link/0, insert/2, insert/3,
+	 lookup/2, info/1, save/1, clear/1, save_all/0]).
 
 %% ------------------------------------------------------------------
 %% gen_server Callback Function Exports
@@ -24,6 +25,40 @@
 
 start_link() ->
 	gen_server:start_link({local, ?MODULE}, ?MODULE, [], []).
+
+insert(Table, Object) ->
+	{ets_insert, Table, Object, ok} = gen_server:call(?MODULE, {insert, Table, Object}),
+	ok.
+
+insert(Table, Key, Value) ->
+	Object = {Key, Value},
+	?MODULE:insert(Table, Object),
+	ok.
+
+lookup(Table, Key) ->
+	{ets_lookup, Table, Key, Value} = gen_server:call(?MODULE, {lookup, Table, Key}),
+	case Value of
+	none ->
+		{ok, none};
+	_ ->
+		{ok, {Key, Value}}
+	end.
+
+info(Table) ->
+	{ets_info, Table, Info} = gen_server:call(?MODULE, {info, Table}),
+	Info.
+
+save(Table) ->
+	{ets_save, Table, ok} = gen_server:call(?MODULE, {save, Table}),
+	ok.
+
+clear(Table) ->
+	{ets_clear, Table, ok} = gen_server:call(?MODULE, {clear, Table}),
+	ok.
+
+save_all() ->
+	{ets_save_all, ok} = gen_server:call(?MODULE, {save_all}),
+	ok.
 
 %% ------------------------------------------------------------------
 %% gen_server Callback Function Definitions
@@ -96,6 +131,8 @@ handle_call(Request, _From, State) ->
 		TableFileTab ->
 			{reply, {ets_save, Table, do_save(TableFileTab)}, State}
 		end;
+	{save_all} ->
+		{reply, {ets_save_all, do_save_all(TableFileTabList)}, State};
 	{info, Table} ->
 		case lists:keyfind(Table, 1, TableFileTabList) of
 		false ->
